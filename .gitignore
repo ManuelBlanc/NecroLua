@@ -1,0 +1,9 @@
+*.dll
+*.exe
+*.lib
+*.res
+*.exp
+*.obj
+*.pdb
+*.ico
+*.mdmp
