@@ -1,6 +1,8 @@
 
 <p align="center">
-  <img alt="Parcel" src="https://repository-images.githubusercontent.com/197468562/e41a8000-abd0-11e9-9e7f-a23cbd23823f" width="749">
+  <a href="#necrolua">
+    <img alt="NecroLua" src="https://repository-images.githubusercontent.com/197468562/e41a8000-abd0-11e9-9e7f-a23cbd23823f" width="749">
+  </a>
 </p>
 
 # NecroLua
@@ -33,7 +35,7 @@ To build NecroLua from source, run `nmake all`. You need the following software 
 + LuaJIT 2.1.0-beta3 (the libraries and the executable are both required)
 + Microsoft Research Detours Package (https://github.com/microsoft/Detours)
 + DbgHelp.dll – Windows Image Helper (included with Windows)
-+ ImageMagick (_Optional used to make the app icon._)
++ ImageMagick (_Optional_, used to make the app icon)
 
 ## Authors
 + [ManuelBlanc](https://github.com/ManuelBlanc)
