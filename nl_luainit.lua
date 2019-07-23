@@ -18,7 +18,8 @@ local DLLNAME = _DLLNAME -- Global set on the C side.
 
 local function TRACE__(...)
   local info = getinfo(2, "lSf")
-  return stderr:write(format("[%s.dll][Lua] %s:%3d: %s\n", DLLNAME, info.short_src, info.currentline, format(...)))
+  return stderr:write(format("[\x1B[33m%s.dll\x1B[0m][\x1B[32mLua\x1B[0m] %s:%3d: %s\n",
+    DLLNAME, info.short_src, info.currentline, format(...)))
 end
 
 -- Windows.

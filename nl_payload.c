@@ -20,7 +20,7 @@
 #include <dbghelp.h>
 #pragma comment(lib,"Dbghelp.lib")
 // User.
-#define MODULENAME DLLNAME".dll"
+#define MODULENAME "\x1B[33m"DLLNAME".dll\x1B[0m"
 #include "nl_common.h"
 
 // Globals.

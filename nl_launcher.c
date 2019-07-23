@@ -8,11 +8,19 @@
 #include <detours.h>
 #pragma comment(lib,"detours.lib")
 // User.
-#define MODULENAME EXENAME".exe"
+#define MODULENAME "\x1B[31m"EXENAME".exe\x1B[0m"
 #include "nl_common.h"
 
 int main(int argc, char** argv)
 {
+	HANDLE hOut = GetStdHandle(STD_ERROR_HANDLE);
+	HANDLE hErr = GetStdHandle(STD_ERROR_HANDLE);
+	DWORD dwModeOut, dwModeErr;
+	GetConsoleMode(hOut, &dwModeOut);
+	GetConsoleMode(hErr, &dwModeErr);
+	SetConsoleMode(hOut, dwModeOut | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+	SetConsoleMode(hErr, dwModeErr | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+
 	CHAR *rlpDlls[1] = { DLLNAME".dll" };
 	STARTUPINFO si = { 0, .cb = sizeof(si) };
 	PROCESS_INFORMATION pi = { 0 };
@@ -48,5 +56,8 @@ int main(int argc, char** argv)
 	CloseHandle(pi.hProcess);
 	CloseHandle(pi.hThread);
 	TRACE__("Done with exit code 0x%08X", exit_code);
+
+	SetConsoleMode(hOut, dwModeOut);
+	SetConsoleMode(hErr, dwModeErr);
 	return exit_code;
 }
