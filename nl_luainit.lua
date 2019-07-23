@@ -5,8 +5,8 @@
 local ffi = require("ffi")
 local cast, new, sizeof = ffi.cast, ffi.new, ffi.sizeof
 local C = ffi.C
-local format, concat, gsub = string.format, table.concat, string.gsub
-local getinfo, stderr = debug.getinfo, io.stderr
+local format, gsub, match, concat = string.format, string.gsub, string.match, table.concat
+local getinfo, traceback, stderr = debug.getinfo, debug.traceback, io.stderr
 
 -- Fix Lua IO.  http://www.boku.ru/2016/02/28/posting-to-console-from-gui-app/
 ffi.cdef[[void *freopen(const char *path, const char *mode, void *stream);]]
@@ -14,7 +14,7 @@ C.freopen("CON", "w", cast("void*", io.stdout))
 C.freopen("CON", "r", cast("void*", io.stdin ))
 C.freopen("CON", "w", cast("void*", io.stderr))
 
-local DLLNAME = _DLLNAME -- Global set on the C side.
+local DLLNAME = _DLLNAME -- Set on the DLL.
 
 local function TRACE__(...)
   local info = getinfo(2, "lSf")
@@ -57,6 +57,7 @@ ffi.cdef[[
   DWORD64 nl_BaseOfDll;
   LONG nl_attach(PVOID *ppPointer, PVOID pDetour);
   LONG nl_detach(PVOID *ppPointer, PVOID pDetour);
+  typedef void CxxClass;
 ]]
 
 -- Symbol manipulation.
@@ -146,6 +147,12 @@ ffi.cdef[[
     PCSTR        Name,
     PSYMBOL_INFO Symbol
   );
+  BOOL SymGetTypeFromName(
+    HANDLE       hProcess,
+    ULONG64      BaseOfDll,
+    PCSTR        Name,
+    PSYMBOL_INFO Symbol
+  );
   BOOL SymSearch(
     HANDLE                         hProcess,
     ULONG64                        BaseOfDll,
@@ -174,7 +181,7 @@ local CV_LOOKUP = {
   [Dbghelp.CV_CALL_NEAR_FAST] = "__fastcall",
   [Dbghelp.CV_CALL_NEAR_STD] = "__stdcall",
   --[Dbghelp.CV_CALL_NEAR_SYS] = "?UNKNOWN",
-  [Dbghelp.CV_CALL_THISCALL] = "__stdcall" -- Compatible.
+  [Dbghelp.CV_CALL_THISCALL] = "__thiscall" -- Compatible.
 }
 -- https://docs.microsoft.com/en-us/visualstudio/debugger/debug-interface-access/basictype
 local BT_LOOKUP = {
@@ -200,25 +207,39 @@ local BT_LOOKUP = {
   --[Dbghelp.btChar32]
 };
 
--- Enumerate throgh symbols and types.
-local enum_allowed = true
-local enum_cb = cast("PSYM_ENUMERATESYMBOLS_CALLBACK", function() end) -- args: pSymInfo, SymbolSize, UserContext
-local function necrolua_enumsymbols(mask, cb)
-  assert(enum_allowed)
-  enum_allowed = false
-  enum_cb:set(cb)
+-- Add the NameLuaStr property to get the name as a Lua string.
+ffi.metatype("SYMBOL_INFO", {
+  __index = function(si, key)
+    if key == "NameLuaStr" then return ffi.string(si.Name, si.NameLen) end
+  end,
+})
+
+-- Enumerate through symbols and types. We re-use the same callback.
+-- Caveat: cannot enumerate while already performing an enumeration.
+local enum_allowed, enum_cb, enum_err = true
+local enum_cb_trampoline = cast("PSYM_ENUMERATESYMBOLS_CALLBACK", function(pSymInfo, SymbolSize, UserContext)
+  local si_table = SYMBOL_INFO_to_table(pSymInfo)
+  local ok, val = xpcall(enum_cb, traceback, si_table, SymbolSize)
+  if ok then return val ~= false end
+  enum_err = val
+  return false
+end)
+local function nlP_doenum(method, mask, cb)
+  assert(enum_allowed, "Cannot nest symbol/type enumerations.")
+  enum_allowed, enum_err, enum_cb = false, nil, cb
   Dbghelp.SymEnumSymbols(NLAPI.nl_hProcess, NLAPI.nl_BaseOfDll, mask or "*", enum_cb, nil)
+  if enum_err then error(enum_err) end
   enum_allowed = true
 end
-local function necrolua_enumtypes(mask, cb)
-  enum_cb:set(cb)
-  enum_allowed = false
-  Dbghelp.SymEnumTypesByName(NLAPI.nl_hProcess, NLAPI.nl_BaseOfDll, mask or "*", enum_cb, nil)
-  enum_allowed = true
+local function nl_enumsymbols(mask, cb)
+  return nlP_doenum(Dbghelp.SymEnumSymbols, mask, cb)
+end
+local function nl_enumtypes(mask, cb)
+  return nlP_doenum(Dbghelp.SymEnumTypesByName, mask, cb)
 end
 
 -- Get the name of a type, performing a wchar_t to char conversion.
-local function necrolua_typename(index)
+local function nl_typename(index)
   local symname = new("WCHAR*[1]")
   local ret = Dbghelp.SymGetTypeInfo(NLAPI.nl_hProcess, NLAPI.nl_BaseOfDll, index, Dbghelp.TI_GET_SYMNAME, symname)
   if ret == 0 then return "ERROR" end
@@ -229,15 +250,15 @@ end
 
 -- Get the value of a DWORD attribute.
 local dword_buf = new("DWORD[1]")
-local function necrolua_typedword(index, key)
+local function nl_typedword(index, key)
   Dbghelp.SymGetTypeInfo(NLAPI.nl_hProcess, NLAPI.nl_BaseOfDll, index, key, dword_buf)
   return dword_buf[0]
 end
 
 -- Retrieve an array with the type indexes of all children.
-local function necrolua_typechildren(index)
+local function nl_typechildren(index)
   local children = {}
-  local childcount = necrolua_typedword(index, Dbghelp.TI_GET_CHILDRENCOUNT)
+  local childcount = nl_typedword(index, Dbghelp.TI_GET_CHILDRENCOUNT)
   if childcount == 0 then return children end
   local size = sizeof("TI_FINDCHILDREN_PARAMS") + childcount * sizeof("ULONG")
   local pFC = cast("TI_FINDCHILDREN_PARAMS*", C.LocalAlloc(0, size))
@@ -249,111 +270,189 @@ local function necrolua_typechildren(index)
   return children
 end
 
+local _ctype_registry = {}
+local function nl_ctype(name)
+  name = gsub(name, "%W", "_") -- Remove invalid characters.
+  if match(name, "^%A") then name = "_"..name end
+  if not _ctype_registry[name] then
+    local typedef = format("typedef struct %s {} %s;", name, name)
+    --TRACE__("nl_ctype :: %q -> %q", name, typedef)
+    ffi.cdef(typedef)
+    _ctype_registry[name] = ffi.typeof(name)
+  end
+  return _ctype_registry[name]
+end
+
 -- Convert a type to a string.
-local function necrolua_typeinfo(index, name)
-  local symtag = necrolua_typedword(index, Dbghelp.TI_GET_SYMTAG)
+local function nl_typedef(index, name, class)
+  name = name or ""
+  local symtag = nl_typedword(index, Dbghelp.TI_GET_SYMTAG)
 
   if symtag == Dbghelp.SymTagFunctionType then -- Function prototype.
-    local callconv = necrolua_typedword(index, Dbghelp.TI_GET_CALLING_CONVENTION)
-    local rettype = necrolua_typedword(index, Dbghelp.TI_GET_TYPE)
-    local arity = necrolua_typedword(index, Dbghelp.TI_GET_COUNT)
-    local args = necrolua_typechildren(index)
-    for i, a in ipairs(args) do args[i] = necrolua_typeinfo(a) end
+    local callconv = nl_typedword(index, Dbghelp.TI_GET_CALLING_CONVENTION)
+    local rettype = nl_typedword(index, Dbghelp.TI_GET_TYPE)
+    local arity = nl_typedword(index, Dbghelp.TI_GET_COUNT)
+    local args = nl_typechildren(index)
+    for i, a in ipairs(args) do args[i] = nl_typedef(a) end
+    if arity == #args + 1 then
+      local this = class or (name and match(name, "([^:]+)::")) or "CxxClass"
+      table.insert(args, 1, this.."*")
+    end
     return format("%s %s (*%s)(%s)",
-      CV_LOOKUP[callconv], necrolua_typeinfo(rettype), name, concat(args, ", ")
+      CV_LOOKUP[callconv], nl_typedef(rettype), name or "", concat(args, ", ")
     )
 
   elseif symtag == Dbghelp.SymTagFunction then -- Function.
-    local functype = necrolua_typedword(index, Dbghelp.TI_GET_TYPE)
-    local funcname = necrolua_typename(index)
-    return necrolua_typeinfo(functype, name or funcname)
+    return nl_typedef(nl_typedword(index, Dbghelp.TI_GET_TYPE), name or nl_typename(index), class)
 
   elseif symtag == Dbghelp.SymTagFunctionArgType then -- Argument.
-    return necrolua_typeinfo(necrolua_typedword(index, Dbghelp.TI_GET_TYPE))
+    return nl_typedef(nl_typedword(index, Dbghelp.TI_GET_TYPE))
 
   elseif symtag == Dbghelp.SymTagPointerType then -- Pointer.
-    return necrolua_typeinfo(necrolua_typedword(index, Dbghelp.TI_GET_TYPE)).."*"
+    return nl_typedef(nl_typedword(index, Dbghelp.TI_GET_TYPE)).."*"
 
   elseif symtag == Dbghelp.SymTagData then -- Datum.
-    return necrolua_typeinfo(necrolua_typedword(index, Dbghelp.TI_GET_TYPE))
+    return nl_typedef(nl_typedword(index, Dbghelp.TI_GET_TYPE))
 
   elseif symtag == Dbghelp.SymTagArrayType then -- Array.
-    local subtype = necrolua_typedword(index, Dbghelp.TI_GET_TYPE)
-    local count = necrolua_typedword(index, Dbghelp.TI_GET_COUNT)
-    return format("%s[%d]", necrolua_typeinfo(subtype, name), count)
+    local subtype = nl_typedword(index, Dbghelp.TI_GET_TYPE)
+    local count = nl_typedword(index, Dbghelp.TI_GET_COUNT)
+    return nl_typedef(subtype, format("%s[%d]", name))
 
   elseif symtag == Dbghelp.SymTagTypedef then -- Type definition (typedef).
-    return necrolua_typename(index)
+    return nl_typename(index)
 
   elseif symtag == Dbghelp.SymTagUDT then -- User Data Type (class/struct/union)
-  return necrolua_typename(index)  -- UdtStruct UdtClass UdtUnion
+    local name = nl_typename(index)
+    nl_ctype(name)
+    return name -- UdtStruct UdtClass UdtUnion
 
   elseif symtag == Dbghelp.SymTagPublicSymbol then
-    return necrolua_typeinfo(necrolua_typedword(index, Dbghelp.TI_GET_TYPE))
+    return nl_typedef(nl_typedword(index, Dbghelp.TI_GET_TYPE))
 
   elseif symtag == Dbghelp.SymTagBaseType then
-    return BT_LOOKUP[necrolua_typedword(index, Dbghelp.TI_GET_BASETYPE)]
+    return BT_LOOKUP[nl_typedword(index, Dbghelp.TI_GET_BASETYPE)]
   end
 
   error("Invalid SymTag: " .. SYMTAG_LOOKUP[symtag])
 end
 
+local _metatype_registry = {}
+local function nl_metatype(index)
+  if _metatype_registry[index] then return _metatype_registry[index] end
+  _metatype_registry[index] = true -- Prevent recursion. (TMP)
+  local name = nl_typename(index)
+  --TRACE__("nl_metatype :: %q", name)
+  local symtag = nl_typedword(index, Dbghelp.TI_GET_SYMTAG)
+  local kind = nl_typedword(index, Dbghelp.TI_GET_DATAKIND)
+  assert(Dbghelp.SymTagUDT == symtag, SYMTAG_LOOKUP[symtag])
+  local ctype = nl_ctype(name)
+  local ctype_ptr = ffi.typeof("$*", ctype)
+  local m_offsets, m_ctypes = {}, {}
+  local m_methods = {}
+  local bc_offset, bc_lookup
+  for i, child in ipairs(nl_typechildren(index)) do
+    local symtag = nl_typedword(child, Dbghelp.TI_GET_SYMTAG)
+
+    if symtag == Dbghelp.SymTagData then -- Member fields.
+      local fieldname = nl_typename(child)
+      --TRACE__("Member %q", fieldname)
+      m_offsets[fieldname] = nl_typedword(child, Dbghelp.TI_GET_OFFSET)
+      m_ctypes[fieldname] = nl_ctype(child)
+
+    elseif symtag == Dbghelp.SymTagFunction then -- Functions.
+      local funcname = nl_typename(child)
+      funcname = match(funcname, "::(.*)$") or funcname
+      local addr = nl_typedword(child, Dbghelp.TI_GET_ADDRESS)
+      local typedef = nl_typedef(child, nil, name)
+      --TRACE__("Method %q -> %q", funcname, typedef)
+      local cfunc = cast(typedef, addr)
+      m_methods[funcname] = function(self, ...)
+        return cfunc(cast(ctype_ptr, self), ...)
+      end
+
+    elseif symtag == Dbghelp.SymTagBaseClass then -- Base class.
+      --assert(not bc_lookup)
+      local bcindex = nl_typedword(child, Dbghelp.TI_GET_TYPE)
+      --TRACE__("Base class %q", nl_typename(bcindex))
+      --bc_offset = nl_typedword(child, Dbghelp.TI_GET_OFFSET)
+      --bc_lookup = nl_metatype(bcindex).__index
+    end
+  end
+
+  local mt = {
+    ctype = ctype, ctype_ptr = ctype_ptr,
+    __index = function(base, key)
+      --TRACE__("%s.__index(%q, %q)", class, base, key)
+      if m_methods[key] then return m_methods[key] end
+      local off = m_offsets[key]
+      if off then return cast(m_ctypes[key], base + off)
+      elseif bc_index then return bc_index(base + bc_offset, key)
+      end
+      error(format("'%s' has no member named '%s'", name, key))
+    end,
+  }
+  ffi.metatype(ctype, mt)
+  _metatype_registry[index] = mt
+  return mt
+end
+
 -- Find a symbol index.
-local function necrolua_symbol(name)
-  local symbol_info = new("SYMBOL_INFO[1]")
-  symbol_info[0].SizeOfStruct = sizeof("SYMBOL_INFO")
-  symbol_info[0].MaxNameLen = 0
-  local ok = Dbghelp.SymFromName(NLAPI.nl_hProcess, name, symbol_info)
-  return ok ~= 0 and symbol_info[0]
+local function nl_symbol(name)
+  local si = new("SYMBOL_INFO[1]")
+  si[0].SizeOfStruct = sizeof("SYMBOL_INFO")
+  si[0].MaxNameLen = 0
+  local ok = Dbghelp.SymFromName(NLAPI.nl_hProcess, name, si)
+  if ok then return si[0] end
+end
+
+local function nl_type(name)
+  local si = new("SYMBOL_INFO[1]")
+  si[0].SizeOfStruct = sizeof("SYMBOL_INFO")
+  si[0].MaxNameLen = 0
+  local ok = Dbghelp.SymGetTypeFromName(NLAPI.nl_hProcess, NLAPI.nl_BaseOfDll, name, si)
+  if ok then return si[0] end
 end
 
 -- Get the value of a symbol.
-local function necrolua_get(mask)
-  local symbol_info = necrolua_symbol(mask)
+local function nl_get(mask)
+  local symbol_info = nl_symbol(mask)
   assert(symbol_info, "Symbol not found: " .. mask)
   local index = symbol_info.Index
-  local typedef = necrolua_typeinfo(index, "")
-  local addr = necrolua_typedword(index, Dbghelp.TI_GET_ADDRESS)
-  TRACE__("necrolua_get :: cast(%q, %s)", typedef, addr)
+  local typedef = nl_typedef(index, "")
+  local addr = nl_typedword(index, Dbghelp.TI_GET_ADDRESS)
+  TRACE__("nl_get :: cast(%q, %s)", typedef, addr)
   return cast(typedef, addr)
 end
 
 -- Attach a detour to a function.
-local function necrolua_attach(mask, handler)
-  local symbol_info = necrolua_symbol(mask)
-  assert(symbol_info, "Symbol not found: " .. mask)
+local function nl_attach(name, handler)
+  local symbol_info = nl_symbol(name)
+  assert(symbol_info, "Symbol not found: " .. tostring(name))
   local index = symbol_info.Index
-  local typedef = necrolua_typeinfo(index, "")
-  local addr = necrolua_typedword(index, Dbghelp.TI_GET_ADDRESS)
-  TRACE__("necrolua_attach :: NLAPI.nl_attach(cast(%q, %s), %s)", typedef, addr, tostring(handler))
+  local class, method = match(name, "([^:]+)::.*")
+  local mt = nl_metatype(nl_type(class).TypeIndex, "index")
+  local typedef = nl_typedef(nl_typedword(index, Dbghelp.TI_GET_TYPE), nil, class)
+  local addr = nl_typedword(index, Dbghelp.TI_GET_ADDRESS)
+  TRACE__("nl_attach :: NLAPI.nl_attach(cast(%q, %s), %s)", typedef, addr, tostring(handler))
   local ppPointer = new("PVOID[1]", cast("PVOID", addr))
+  TRACE__("typedef : %q", typedef)
   local pDetour = cast(typedef, handler)
   NLAPI.nl_attach(ppPointer, pDetour)
-  return cast(typedef, ppPointer[0])
+  local root = cast(typedef, ppPointer[0])
+  return function(this, ...) return root(this, ...) end
 end
 
--- Detach a detour from a function.
-local function necrolua_detach(mask, handler)
-  local symbol_info = necrolua_symbol(mask)
-  assert(symbol_info, "Symbol not found: " .. mask)
-  local index = symbol_info.Index
-  local typedef = necrolua_typeinfo(index, "")
-  local addr = necrolua_typedword(index, Dbghelp.TI_GET_ADDRESS)
-  TRACE__("NLAPI.nl_detach(cast(%q, %s), %s)", typedef, addr, tostring(handler))
-  local ppPointer = new("PVOID[1]", cast("PVOID", addr))
-  local pDetour = cast(typedef, handler)
-  NLAPI.nl_detach(ppPointer, pDetour)
-  return cast(typedef, ppPointer[0])
-end
-
--- Advice-like hooking [chaining NYI].
+-- Advice-like hooking.
 local _hook_registry = {}
-local function necrolua_hook(mask, handler)
+local function nl_hook(mask, handler)
   if not _hook_registry[mask] then
-    local orig = necrolua_attach(mask, function(...)
-      return _hook_registry[mask](...) -- Dynamically get the last one.
+    _hook_registry[mask] = nl_attach(mask, function(...)
+      local ok, val = xpcall(_hook_registry[mask], traceback, ...)
+      if ok then return val end
+      io.stderr:write(val, "\n")
+      os.exit(1)
     end)
-    _hook_registry[mask] = orig
   end
   local prev = _hook_registry[mask]
   _hook_registry[mask] = function(...)
@@ -361,23 +460,30 @@ local function necrolua_hook(mask, handler)
   end
 end
 
--- Exports (as global).
-necrolua = {
-  enumsymbols   = necrolua_enumsymbols,
-  enumtypes     = necrolua_enumtypes,
-  typename      = necrolua_typename,
-  typedword     = necrolua_typedword,
-  typechildren  = necrolua_typechildren,
-  typeinfo      = necrolua_typeinfo,
-  symbol        = necrolua_symbol,
-  attach        = necrolua_attach,
-  detach        = necrolua_detach,
-  hook          = necrolua_hook,
-  get           = necrolua_get,
-}
+local function nl_reload(mods)
+  TRACE__("Reloading %s mods ...", mods and #mods)
+  if not mods then return end
+  for _, init in ipairs(mods) do
+    TRACE__("Reload %s", init)
+    dofile(init)
+  end
+end
+
+-- Exports.
 TRACE__("%s.init mod API loaded.", DLLNAME)
-
-
-local entrypoint = "mods/init.lua"
-TRACE__("Running user entrypoint (%q) ...", entrypoint)
-dofile(entrypoint) -- [TMP] User code entrypoint.
+return {
+  enumsymbols   = nl_enumsymbols,
+  enumtypes     = nl_enumtypes,
+  typename      = nl_typename,
+  typedword     = nl_typedword,
+  typechildren  = nl_typechildren,
+  typedef       = nl_typedef,
+  ctype         = nl_ctype,
+  metatype      = nl_metatype,
+  type          = nl_type,
+  symbol        = nl_symbol,
+  attach        = nl_attach,
+  hook          = nl_hook,
+  get           = nl_get,
+  reload        = nl_reload,
+}

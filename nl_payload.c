@@ -47,9 +47,39 @@ __declspec(dllexport) LONG nl_detach(PVOID *ppPointer, PVOID pDetour)
 	return ret;
 }
 
+static BOOL nlP_filexists(LPCTSTR szPath)
+{
+	DWORD dwAttrib = GetFileAttributes(szPath);
+	return (dwAttrib != INVALID_FILE_ATTRIBUTES && !(dwAttrib & FILE_ATTRIBUTE_DIRECTORY));
+}
+
+static int nlP_getmods(lua_State *L)
+{
+	lua_createtable(L, 3, 0); // Avoid first few resizes.
+	const char *path = luaL_checkstring(L, 1);
+	const char *pattern = lua_pushfstring(L, "%s\\*", path);
+
+	TRACE__("Scanning mods in '%s' ...", path);
+	WIN32_FIND_DATA ffd;
+	HANDLE hFind = FindFirstFile(pattern, &ffd);
+	FindNextFile(hFind, &ffd);
+	lua_createtable(L, 3, 0);
+	int n = 0;
+	while (FindNextFile(hFind, &ffd)) {
+		if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+			const char *init = lua_pushfstring(L, "%s\\%s\\lua\\init.lua", path, ffd.cFileName);
+			if (nlP_filexists(init)) lua_rawseti(L, 2, ++n);
+			else lua_pop(L, 1);
+		}
+	}
+	FindClose(hFind);
+	lua_pop(L, 2);
+	return 1;
+}
+
 static int nlP_traceback(lua_State *L)
 {
-	luaL_traceback(L, L, lua_tostring(L, 1), 1); // Lua 5.2
+	luaL_traceback(L, L, lua_tostring(L, -1), 1); // Lua 5.2
 	return 1;
 }
 
@@ -66,13 +96,7 @@ static DWORD WINAPI nlP_initialize(LPVOID ptr)
 #undef _CRT_SECURE_NO_WARNINGS
 	}
 
-	TRACE__("Opening the Lua state ...");
-	lua_State *L = nl_L = luaL_newstate();
-	luaL_openlibs(L);
-	lua_pushliteral(L, DLLNAME);
-	lua_setglobal(L, "_DLLNAME");
-
-	TRACE__("Preparing the symbol API ...");
+	TRACE__("Loading symbol information ...");
 	nl_hProcess = GetCurrentProcess();
 	SymInitialize(nl_hProcess, NULL, FALSE);
 	MODULEINFO modinfo; //lpBaseOfDll//SizeOfImage//EntryPoint
@@ -83,17 +107,34 @@ static DWORD WINAPI nlP_initialize(LPVOID ptr)
 		NULL, 0);
 	TRACE__("BaseOfExe is 0x%08X", nl_BaseOfDll);
 
-	TRACE__("Initializing the Lua environment ...");
-	TRACE__("Top : %d", lua_gettop(L));
+	TRACE__("Opening the Lua state ...");
+	lua_State *L = nl_L = luaL_newstate();
+	luaL_openlibs(L);
+	lua_pushliteral(L, DLLNAME);
+	lua_setglobal(L, "_DLLNAME");
+
+	TRACE__("Initializing the Lua API ...");
 	lua_pushcfunction(L, &nlP_traceback);
 	lua_getglobal(L, "require");
 	lua_pushliteral(L, DLLNAME".init");
+	if (lua_pcall(L, 1, 1, 1)) {
+		TRACE__("Lua error: %s\n", lua_tostring(L, -1));
+		exit(EXIT_FAILURE);
+	}
+	lua_pushvalue(L, -1);
+	lua_setglobal(L, "necrolua");
+
+	TRACE__("(Re)loading mods. ...");
+	lua_getfield(L, -1, "reload");
+	lua_pushcfunction(L, nlP_getmods);
+	lua_pushliteral(L, "mods");
+	lua_call(L, 1, 1);
 	if (lua_pcall(L, 1, 0, 1)) {
 		TRACE__("Lua error: %s\n", lua_tostring(L, -1));
 		exit(EXIT_FAILURE);
 	}
 
-	lua_settop(L, 0);
+	lua_settop(L, 0); // Truncate the stack.
 	TRACE__("Mods initialized.");
 	return 0;
 }
