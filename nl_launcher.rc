@@ -1,12 +1,21 @@
+// NecroLua resource file definition.
+// Copyright (C) 2019 Manuel Blanc. See Copyright Notice in LICENSE.txt
+
 #include <winver.h>
 #include <ntdef.h>
 
+#if RELEASE == 1
 APP_ICON ICON "nl_launcher.ico"
+#define MY_FILEFLAGS 0
+#else
+#define MY_FILEFLAGS VS_FF_PRIVATEBUILD
+#endif
+
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION     1,0,0,0
-PRODUCTVERSION  1,0,0,0
+FILEVERSION     0,0,0,0
+PRODUCTVERSION  0,0,0,0
 FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
-FILEFLAGS       0
+FILEFLAGS       MY_FILEFLAGS
 FILEOS          VOS_NT
 FILETYPE        VFT_APP
 FILESUBTYPE     VFT2_UNKNOWN
@@ -20,10 +29,13 @@ BEGIN
       VALUE "InternalName"     , EXENAME
       VALUE "OriginalFilename" , EXENAME ".exe" // Space needed.
       VALUE "FileDescription"  , "NecroDancer modding via LuaJIT"
-      VALUE "FileVersion"      , "v1.0.0"
+      VALUE "FileVersion"      , VERSION
       VALUE "ProductName"      , EXENAME
-      VALUE "ProductVersion"   , "v1.0.0"
-      VALUE "LegalCopyright"   , "(C) 2019 Manuel Blanc"
+      VALUE "ProductVersion"   , VERSION
+      VALUE "LegalCopyright"   , "(C) 2019 Manuel Blanc. See LICENSE.txt"
+#if RELEASE == 0
+      VALUE "PrivateBuild"     , "Made by " USERNAME " in " COMPUTERNAME
+#endif
     END
   END
   BLOCK "VarFileInfo"
