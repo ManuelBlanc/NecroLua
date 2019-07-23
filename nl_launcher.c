@@ -5,7 +5,7 @@
 #include <windows.h>
 #pragma comment(lib,"user32.lib")
 // Detours.
-#include <detours.h>
+#include "detours.h"
 #pragma comment(lib,"detours.lib")
 // User.
 #define MODULENAME "\x1B[31m"EXENAME".exe\x1B[0m"

@@ -8,7 +8,7 @@
 #include <windows.h>
 #include <psapi.h>
 // Detours
-#include <detours.h>
+#include "detours.h"
 #pragma comment(lib,"detours.lib")
 // Lua.
 #include "lua.h"
@@ -17,7 +17,7 @@
 #include "luajit.h"
 #pragma comment(lib,"lua51.lib")
 // DbgHelp
-#include <dbghelp.h>
+#include "dbghelp.h"
 #pragma comment(lib,"Dbghelp.lib")
 // User.
 #define MODULENAME "\x1B[33m"DLLNAME".dll\x1B[0m"
