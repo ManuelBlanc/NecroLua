@@ -52,7 +52,7 @@ include/:
 detours.h  lauxlib.h  lua.h  luaconf.h  luajit.h  lualib.h
 
 lib/:
-detours.lib  lua51.dll  lua51.lib
+detours.lib  lua51.lib
 ```
 
 3. `nmake all`
@@ -93,8 +93,9 @@ end)
 
 This mod will make invert your character's electricity; e.g. you will do arcing electric attacks when you're _not_ on the zone 5 wire.
 
-## Authors
+## Contributors
 + [ManuelBlanc](https://github.com/ManuelBlanc)
++ [pancelor](https://github.com/pancelor)
 
 Special thanks to IamLupo and Adikso.
 
