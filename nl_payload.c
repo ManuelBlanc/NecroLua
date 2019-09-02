@@ -47,6 +47,13 @@ __declspec(dllexport) LONG nl_detach(PVOID *ppPointer, PVOID pDetour)
 	return ret;
 }
 
+// idk how to thread this through to Lua; this is probably not the best
+// way but it works
+__declspec(dllexport) DWORD tempGetLastError()
+{
+	return GetLastError();
+}
+
 static BOOL nlP_filexists(LPCTSTR szPath)
 {
 	DWORD dwAttrib = GetFileAttributes(szPath);
