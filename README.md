@@ -37,8 +37,12 @@ Check the [wiki documentation][wiki] for more information on the modding API.
 + [LuaJIT 2.1.0-beta3][luajit]
   + Use luajit's included `src/msvcbuild.bat` instead of running the makefile
 + [Microsoft Research Detours Package][detours]
+  + If you run into issues, try installing the ".NET desktop development tools" through the Visual Studio Installer
 + DbgHelp.dll – Windows Image Helper (included with Windows)
 + ImageMagick (_Optional_, used to make the app icon)
+
+  [luajit]: https://luajit.org/install.html
+  [detours]: https://github.com/microsoft/Detours
 
 2. After installing the above packages, go to your NecroLua directory and create an `include` subdirectory and a `lib` subdirectory, and copy in the required headers and library files; the following files should be present:
 
@@ -58,9 +62,6 @@ detours.lib  lua51.dll  lua51.lib
 + `NecroLuaAPI.dll`
 + `lua51.dll`
 + `steam_appid.txt`
-
-  [luajit]: [https://luajit.org/install.html]
-  [detours]: [https://github.com/microsoft/Detours]
 
 5. Continue following the [install instructions](#installation-and-usage)
 
