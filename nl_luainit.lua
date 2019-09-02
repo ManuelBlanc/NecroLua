@@ -402,7 +402,8 @@ local function nl_symbol(name)
   local si = new("SYMBOL_INFO[1]")
   si[0].SizeOfStruct = sizeof("SYMBOL_INFO")
   si[0].MaxNameLen = 0
-  local ok = Dbghelp.SymFromName(NLAPI.nl_hProcess, name, si)
+  local code = Dbghelp.SymFromName(NLAPI.nl_hProcess, name, si)
+  local ok = (code == 1)
   if ok then return si[0] end
 end
 
@@ -410,7 +411,8 @@ local function nl_type(name)
   local si = new("SYMBOL_INFO[1]")
   si[0].SizeOfStruct = sizeof("SYMBOL_INFO")
   si[0].MaxNameLen = 0
-  local ok = Dbghelp.SymGetTypeFromName(NLAPI.nl_hProcess, NLAPI.nl_BaseOfDll, name, si)
+  local code = Dbghelp.SymGetTypeFromName(NLAPI.nl_hProcess, NLAPI.nl_BaseOfDll, name, si)
+  local ok = (code == 1)
   if ok then return si[0] end
 end
 
