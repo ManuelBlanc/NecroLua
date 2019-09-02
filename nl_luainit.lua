@@ -58,6 +58,7 @@ ffi.cdef[[
   LONG nl_attach(PVOID *ppPointer, PVOID pDetour);
   LONG nl_detach(PVOID *ppPointer, PVOID pDetour);
   DWORD tempGetLastError();
+  DWORD tempPrintLastError();
   typedef void CxxClass;
 ]]
 
@@ -410,6 +411,7 @@ local function nl_symbol(name)
   local code = NLAPI.tempGetLastError()
   print("----debug----")
   print("error code: "..tostring(code))
+  NLAPI.tempPrintLastError()
   print("----debug----")
 end
 

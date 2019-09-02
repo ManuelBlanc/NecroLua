@@ -53,6 +53,29 @@ __declspec(dllexport) DWORD tempGetLastError()
 {
 	return GetLastError();
 }
+__declspec(dllexport) DWORD tempPrintLastError()
+{
+	// adapted from https://docs.microsoft.com/en-us/windows/win32/debug/retrieving-the-last-error-code
+
+	LPVOID lpMsgBuf;
+	DWORD dw = GetLastError();
+
+	FormatMessage(
+			FORMAT_MESSAGE_ALLOCATE_BUFFER |
+			FORMAT_MESSAGE_FROM_SYSTEM |
+			FORMAT_MESSAGE_IGNORE_INSERTS,
+			NULL,
+			dw,
+			MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+			(LPTSTR) &lpMsgBuf,
+			0, NULL );
+
+	printf("last error was: %d (%s)", dw, lpMsgBuf);
+
+	LocalFree(lpMsgBuf);
+
+	return 0; // returning b/c declaring the function as VOID instead of DWORD caused mysterious issues
+}
 
 static BOOL nlP_filexists(LPCTSTR szPath)
 {
