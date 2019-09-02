@@ -49,28 +49,24 @@ __declspec(dllexport) LONG nl_detach(PVOID *ppPointer, PVOID pDetour)
 
 // idk how to thread this through to Lua; this is probably not the best
 // way but it works
-__declspec(dllexport) DWORD tempGetLastError()
-{
-	return GetLastError();
-}
 __declspec(dllexport) DWORD tempPrintLastError()
 {
 	// adapted from https://docs.microsoft.com/en-us/windows/win32/debug/retrieving-the-last-error-code
 
 	LPVOID lpMsgBuf;
-	DWORD dw = GetLastError();
+	DWORD code = GetLastError();
 
 	FormatMessage(
 			FORMAT_MESSAGE_ALLOCATE_BUFFER |
 			FORMAT_MESSAGE_FROM_SYSTEM |
 			FORMAT_MESSAGE_IGNORE_INSERTS,
 			NULL,
-			dw,
+			code,
 			MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
 			(LPTSTR) &lpMsgBuf,
 			0, NULL );
 
-	printf("last error was: %d (%s)", dw, lpMsgBuf);
+	printf("Error %d: %s", code, (char *)lpMsgBuf);
 
 	LocalFree(lpMsgBuf);
 

@@ -57,7 +57,6 @@ ffi.cdef[[
   DWORD64 nl_BaseOfDll;
   LONG nl_attach(PVOID *ppPointer, PVOID pDetour);
   LONG nl_detach(PVOID *ppPointer, PVOID pDetour);
-  DWORD tempGetLastError();
   DWORD tempPrintLastError();
   typedef void CxxClass;
 ]]
@@ -401,26 +400,23 @@ end
 
 -- Find a symbol index.
 local function nl_symbol(name)
+  print("calling nl_symbol(\""..name.."\")")
   local si = new("SYMBOL_INFO[1]")
   si[0].SizeOfStruct = sizeof("SYMBOL_INFO")
   si[0].MaxNameLen = 0
-  print("----debug----")
-  print("error code: "..tostring(NLAPI.tempGetLastError()))
   local ret = Dbghelp.SymFromName(NLAPI.nl_hProcess, name, si)
   if ret == 1 then return si[0] end
-  local code = NLAPI.tempGetLastError()
-  print("----debug----")
-  print("error code: "..tostring(code))
   NLAPI.tempPrintLastError()
-  print("----debug----")
 end
 
 local function nl_type(name)
+  print("calling nl_type(\""..name.."\")")
   local si = new("SYMBOL_INFO[1]")
   si[0].SizeOfStruct = sizeof("SYMBOL_INFO")
   si[0].MaxNameLen = 0
   local ret = Dbghelp.SymGetTypeFromName(NLAPI.nl_hProcess, NLAPI.nl_BaseOfDll, name, si)
   if ret == 1 then return si[0] end
+  NLAPI.tempPrintLastError()
 end
 
 -- Get the value of a symbol.
