@@ -16,9 +16,10 @@
   ```
   C:\Program Files (x86)\Steam\steamapps\common\Crypt of the NecroDancer
   ```
-3. Run the NecroLua.exe executable to launch the game with mods.
-4. Enjoy!
-5. If you have a question, feature request or bug report, please [open an issue][issues].
+3. Create a [test mod](#example-mod)
+4. Run the NecroLua.exe executable to launch the game with mods.
+5. Enjoy!
+6. If you have a question, feature request or bug report, please [open an issue][issues].
 
   [releases]: https://github.com/ManuelBlanc/NecroLua/releases
   [issues]: https://github.com/ManuelBlanc/NecroLua/issues
@@ -29,16 +30,72 @@ Check the [wiki documentation][wiki] for more information on the modding API.
   [wiki]: https://github.com/ManuelBlanc/NecroLua/wiki
 
 ## Building from source
-To build NecroLua from source, run `nmake all`. You need the following software packages:
+1. First, install the following software packages:
 
 + Microsoft command line build tools (MSVC v142 - VS 2019 C++ x64/86 build tools)
-+ LuaJIT 2.1.0-beta3 (the libraries and the executable are both required)
-+ Microsoft Research Detours Package (https://github.com/microsoft/Detours)
+  + Make sure to use the x86 (32-bit) tools since NecroDancer.exe is a 32-bit executable
++ [LuaJIT 2.1.0-beta3][luajit]
+  + Use luajit's included `src/msvcbuild.bat` instead of running the makefile
++ [Microsoft Research Detours Package][detours]
+  + If you run into issues, try installing the ".NET desktop development tools" through the Visual Studio Installer
 + DbgHelp.dll – Windows Image Helper (included with Windows)
 + ImageMagick (_Optional_, used to make the app icon)
 
-## Authors
+  [luajit]: https://luajit.org/install.html
+  [detours]: https://github.com/microsoft/Detours
+
+2. After installing the above packages, go to your NecroLua directory and create an `include` subdirectory and a `lib` subdirectory, and copy in the required headers and library files; the following files should be present:
+
+```bash
+$ ls lib/ include/
+include/:
+detours.h  lauxlib.h  lua.h  luaconf.h  luajit.h  lualib.h
+
+lib/:
+detours.lib  lua51.lib
+```
+
+3. `nmake all`
+
+4. Copy the following files to the same directory as the NecroDancer.exe executable:
++ `NecroLua.exe `
++ `NecroLuaAPI.dll`
++ `lua51.dll`
++ `steam_appid.txt`
+
+5. Continue following the [install instructions](#installation-and-usage)
+
+## Example mod
+
+Set up the following directory structure:
+```
+Crypt of the NecroDancer
+|-- NecroDancer.exe
+|-- ...
+|-- <other files and directories>
+|-- ...
+`-- mods
+    `-- example-mod
+        `-- lua
+            `-- init.lua
+```
+
+`init.lua` should have the following contents:
+```lua
+print ""
+print "loading lua mod"
+print ""
+
+necrolua.hook("c_Player::p_GetElectricStrength", function(func, self)
+  return 1 - func(self)
+end)
+```
+
+This mod will make invert your character's electricity; e.g. you will do arcing electric attacks when you're _not_ on the zone 5 wire.
+
+## Contributors
 + [ManuelBlanc](https://github.com/ManuelBlanc)
++ [pancelor](https://github.com/pancelor)
 
 Special thanks to IamLupo and Adikso.
 

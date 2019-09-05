@@ -8,3 +8,5 @@
 *.ico
 *.mdmp
 *.zip
+include/
+lib/
