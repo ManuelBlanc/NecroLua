@@ -47,6 +47,32 @@ __declspec(dllexport) LONG nl_detach(PVOID *ppPointer, PVOID pDetour)
 	return ret;
 }
 
+// idk how to thread this through to Lua; this is probably not the best
+// way but it works
+__declspec(dllexport) DWORD tempPrintLastError()
+{
+	// adapted from https://docs.microsoft.com/en-us/windows/win32/debug/retrieving-the-last-error-code
+
+	LPVOID lpMsgBuf;
+	DWORD code = GetLastError();
+
+	FormatMessage(
+			FORMAT_MESSAGE_ALLOCATE_BUFFER |
+			FORMAT_MESSAGE_FROM_SYSTEM |
+			FORMAT_MESSAGE_IGNORE_INSERTS,
+			NULL,
+			code,
+			MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+			(LPTSTR) &lpMsgBuf,
+			0, NULL );
+
+	printf("Error %d: %s", code, (char *)lpMsgBuf);
+
+	LocalFree(lpMsgBuf);
+
+	return 0; // returning b/c declaring the function as VOID instead of DWORD caused mysterious issues
+}
+
 static BOOL nlP_filexists(LPCTSTR szPath)
 {
 	DWORD dwAttrib = GetFileAttributes(szPath);
