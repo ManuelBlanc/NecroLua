@@ -1,3 +1,6 @@
+# Full Lua modding support was officially added in Crypt of the NecroDancer: Synchrony, rendering this project obsolete. To mod CotND, please see: https://vortexbuffer.com/synchrony/docs/
+
+---
 
 <p align="center">
   <a href="#necrolua">
